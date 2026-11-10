@@ -1,0 +1,1811 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no,maximum-scale=1">
+<title>Demolición 3D — City Destruction Engine</title>
+<style>
+:root {
+  --bg-hud: rgba(14, 18, 24, 0.78);
+  --border-hud: rgba(255, 255, 255, 0.12);
+  --accent-fire: #ff451a;
+  --accent-fire-glow: rgba(255, 69, 26, 0.45);
+  --accent-gold: #ffb800;
+  --accent-blue: #00b4d8;
+  --text-primary: #f0f4f8;
+  --text-secondary: #94a3b8;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  overflow: hidden; background: #0c0f14; color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  -webkit-user-select: none; user-select: none; touch-action: none;
+}
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; z-index: 1; }
+
+/* Capa de entrada táctil */
+#pad { position: fixed; inset: 0; z-index: 5; touch-action: none; }
+
+/* Retícula de disparo táctica */
+#ch {
+  position: fixed; left: 50%; top: 50%;
+  width: 22px; height: 22px; margin: -11px 0 0 -11px;
+  pointer-events: none; z-index: 10;
+  display: flex; align-items: center; justify-content: center;
+}
+#ch::before {
+  content: ''; width: 4px; height: 4px; border-radius: 50%;
+  background: #ffffff; box-shadow: 0 0 4px #000, 0 0 8px rgba(255,255,255,0.9);
+}
+#ch .ch-line {
+  position: absolute; background: rgba(255,255,255,0.85);
+  box-shadow: 0 0 2px rgba(0,0,0,0.8);
+}
+#ch .ch-top { width: 2px; height: 7px; top: 0; }
+#ch .ch-bottom { width: 2px; height: 7px; bottom: 0; }
+#ch .ch-left { height: 2px; width: 7px; left: 0; }
+#ch .ch-right { height: 2px; width: 7px; right: 0; }
+
+/* Joystick Virtual */
+#stk {
+  position: fixed; width: 110px; height: 110px; margin: -55px 0 0 -55px;
+  border-radius: 50%; background: radial-gradient(circle, rgba(255,255,255,0.08) 0%, rgba(20,26,35,0.45) 80%);
+  border: 2px solid rgba(255, 255, 255, 0.22);
+  display: none; pointer-events: none; z-index: 15;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+}
+#kb {
+  position: absolute; left: 50%; top: 50%;
+  width: 48px; height: 48px; margin: -24px;
+  border-radius: 50%; background: radial-gradient(circle, #ffffff 0%, #cbd5e1 100%);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.5), inset 0 1px 2px #fff;
+  transition: transform 0.04s ease-out;
+}
+
+/* Barra superior: Telemetría de Demolición */
+#top-hud {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px);
+  left: calc(env(safe-area-inset-left, 0px) + 14px);
+  display: flex; align-items: center; gap: 12px;
+  z-index: 20; pointer-events: auto;
+}
+.hud-panel {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--bg-hud); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-hud); border-radius: 14px;
+  padding: 8px 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+#stat-icon {
+  width: 22px; height: 22px; fill: var(--accent-fire);
+  filter: drop-shadow(0 0 6px var(--accent-fire-glow));
+}
+.stat-info { display: flex; flex-direction: column; }
+.stat-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-secondary); }
+.stat-val { font-size: 18px; font-weight: 800; color: #fff; font-variant-numeric: tabular-nums; }
+.stat-val span { color: var(--accent-gold); }
+
+/* Banner de colapso estructural */
+#collapse-alert {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 72px); left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: rgba(220, 38, 38, 0.9); backdrop-filter: blur(8px);
+  border: 1px solid rgba(255,255,255,0.3); border-radius: 30px;
+  padding: 6px 18px; font-size: 12px; font-weight: 800; letter-spacing: 0.1em;
+  text-transform: uppercase; color: #fff; box-shadow: 0 4px 20px rgba(220,38,38,0.6);
+  opacity: 0; pointer-events: none; transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  z-index: 25;
+}
+#collapse-alert.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+/* Botones y Acciones */
+.btn-icon {
+  width: 42px; height: 42px; border-radius: 12px; border: 1px solid var(--border-hud);
+  background: var(--bg-hud); backdrop-filter: blur(12px); color: var(--text-primary);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; padding: 0; transition: all 0.15s ease;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+.btn-icon:active, .btn-icon.active {
+  transform: scale(0.92); background: rgba(255, 69, 26, 0.85);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+.btn-icon svg { width: 22px; height: 22px; fill: currentColor; }
+
+/* Selector de Armas lateral */
+#weapon-dock {
+  position: fixed; top: calc(env(safe-area-inset-top, 0px) + 12px);
+  right: calc(env(safe-area-inset-right, 0px) + 14px);
+  display: flex; flex-direction: column; gap: 8px; z-index: 20;
+}
+.dock-btn {
+  width: 52px; height: 52px; border-radius: 14px;
+  position: relative;
+}
+.dock-btn .wp-num {
+  position: absolute; bottom: 3px; right: 5px; font-size: 9px;
+  font-weight: 700; color: var(--text-secondary);
+}
+.dock-btn.on {
+  background: linear-gradient(135deg, #ff451a, #e63910);
+  border-color: #ff9100; box-shadow: 0 0 16px var(--accent-fire-glow);
+  color: #fff;
+}
+.dock-btn.on .wp-num { color: #fff; }
+
+/* Botones de acción táctiles (Salto y Disparo) */
+#touch-actions {
+  position: fixed; right: calc(env(safe-area-inset-right, 0px) + 18px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 20px);
+  display: flex; align-items: flex-end; gap: 14px; z-index: 20;
+  pointer-events: auto;
+}
+#btn-jump {
+  width: 62px; height: 62px; border-radius: 50%;
+  background: var(--bg-hud); backdrop-filter: blur(12px);
+  border: 1px solid var(--border-hud); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+#btn-jump svg { width: 28px; height: 28px; fill: currentColor; }
+
+#btn-fire {
+  width: 88px; height: 88px; border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ff5722 0%, #d82b00 100%);
+  border: 2px solid rgba(255, 255, 255, 0.35); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 6px 25px var(--accent-fire-glow), inset 0 2px 4px rgba(255,255,255,0.4);
+  transition: transform 0.08s ease;
+}
+#btn-fire:active {
+  transform: scale(0.92);
+  background: radial-gradient(circle at 50% 50%, #e62500 0%, #aa1b00 100%);
+  box-shadow: 0 2px 10px var(--accent-fire-glow);
+}
+#btn-fire svg { width: 44px; height: 44px; fill: #ffffff; }
+
+/* Modal de bienvenida / Ayuda */
+#menu {
+  position: fixed; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(8, 10, 14, 0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  padding: 20px;
+}
+.menu-card {
+  background: #141820; border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 20px; padding: 28px; max-width: 440px; width: 100%;
+  box-shadow: 0 16px 40px rgba(0,0,0,0.6); position: relative;
+  overflow: hidden;
+}
+.menu-card::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+  background: linear-gradient(90deg, #ff451a, #ffb800, #00b4d8);
+}
+.menu-title {
+  font-size: 24px; font-weight: 800; margin: 0 0 6px; letter-spacing: -0.02em;
+  display: flex; align-items: center; gap: 8px; color: #fff;
+}
+.menu-subtitle { font-size: 13px; color: var(--text-secondary); margin-bottom: 16px; }
+.features-list { display: flex; flex-direction: column; gap: 10px; margin-bottom: 22px; }
+.feat-item {
+  display: flex; align-items: flex-start; gap: 10px; font-size: 13px; line-height: 1.45; color: #cbd5e1;
+}
+.feat-item svg { width: 18px; height: 18px; fill: var(--accent-gold); flex-shrink: 0; margin-top: 1px; }
+.feat-item strong { color: #fff; }
+#btn-start {
+  width: 100%; border: 0; border-radius: 12px;
+  background: linear-gradient(135deg, #ff451a, #ff7a00);
+  color: #fff; font-size: 16px; font-weight: 700; padding: 14px;
+  cursor: pointer; box-shadow: 0 4px 18px rgba(255, 69, 26, 0.45);
+  transition: transform 0.1s, opacity 0.1s;
+}
+#btn-start:active { transform: scale(0.98); opacity: 0.9; }
+</style>
+</head>
+<body>
+
+<!-- SVG Icons Defs (Zero-dependency vector icons) -->
+<svg style="display:none;">
+  <defs>
+    <!-- Icono RPG / Bazuca -->
+    <g id="icon-bazooka">
+      <path d="M2.5 15.5l14-14 3.5 3.5-14 14z" />
+      <path d="M18.5 3.5l3-3 2 2-3 3z" />
+      <path d="M1 17l4 4-2 2-4-4z" />
+      <path d="M7 15l2 4 2-1-1.5-3z" />
+      <circle cx="16" cy="6" r="1.5" />
+    </g>
+    <!-- Icono Martillo / Sledgehammer -->
+    <g id="icon-hammer">
+      <path d="M19.5 3.5l-4-2-3 3 2 2-7.5 7.5c-.8.8-.8 2 0 2.8l1.4 1.4c.8.8 2 .8 2.8 0l7.5-7.5 2 2 3-3-2-4z"/>
+      <path d="M13 6l5 5"/>
+    </g>
+    <!-- Icono C4 / Explosivo táctico -->
+    <g id="icon-c4">
+      <rect x="4" y="6" width="16" height="13" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+      <rect x="8" y="9" width="8" height="5" rx="1"/>
+      <path d="M12 2v4M12 19v3" stroke="currentColor" stroke-width="2"/>
+      <circle cx="12" cy="11.5" r="1" fill="#fff"/>
+    </g>
+    <!-- Icono Escopeta / Shotgun -->
+    <g id="icon-shotgun">
+      <path d="M2 17l4-2 16-7v-3l-18 8z" />
+      <rect x="6" y="14" width="7" height="3" rx="1" />
+      <path d="M3 18l3-1 1 4-2 1z" />
+    </g>
+    <!-- Icono Disparo / Explosión Retícula -->
+    <g id="icon-crosshair-burst">
+      <circle cx="12" cy="12" r="3" fill="currentColor"/>
+      <path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="12" cy="12" r="7.5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-dasharray="3 3"/>
+    </g>
+    <!-- Icono Salto -->
+    <g id="icon-jump-thrust">
+      <path d="M12 3l6 6h-4v7h-4v-7h-4z"/>
+      <path d="M5 20h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+    </g>
+    <!-- Icono Reiniciar -->
+    <g id="icon-reload">
+      <path d="M12 4V1L8 5l4 4V6a6 6 0 11-6 6H4a8 8 0 108-8z"/>
+    </g>
+    <!-- Icono Demolición Llama -->
+    <g id="icon-flame">
+      <path d="M12 2c-.5 2-2 4-4 6-2 2-3 4.5-3 7 0 4 3 7 7 7s7-3 7-7c0-3-2-5.5-3-7-1-1.5-2.5-3.5-3-6-.2 1.5-.7 3-1 3.5-.5-1-1-2.5 0-3.5z"/>
+    </g>
+    <!-- Icono Check -->
+    <g id="icon-check">
+      <path d="M5 13l4 4L19 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+  </defs>
+</svg>
+
+<!-- Canvas 3D -->
+<div id="pad"></div>
+
+<!-- Retícula táctica -->
+<div id="ch">
+  <div class="ch-line ch-top"></div>
+  <div class="ch-line ch-bottom"></div>
+  <div class="ch-line ch-left"></div>
+  <div class="ch-line ch-right"></div>
+</div>
+
+<!-- Joystick virtual para móvil -->
+<div id="stk"><div id="kb"></div></div>
+
+<!-- Telemetría superior -->
+<div id="top-hud">
+  <div class="hud-panel">
+    <svg id="stat-icon" viewBox="0 0 24 24"><use href="#icon-flame"/></svg>
+    <div class="stat-info">
+      <span class="stat-title">Ciudad Destruida</span>
+      <span class="stat-val"><span id="pc">0%</span></span>
+    </div>
+  </div>
+  <button class="btn-icon" id="btn-rs" title="Reiniciar Ciudad">
+    <svg viewBox="0 0 24 24"><use href="#icon-reload"/></svg>
+  </button>
+</div>
+
+<!-- Alerta de Colapso Estructural -->
+<div id="collapse-alert">⚠️ ¡COLAPSO ESTRUCTURAL DETECTADO!</div>
+
+<!-- Barra de Selección de Armas -->
+<div id="weapon-dock">
+  <button class="btn-icon dock-btn on" id="wp-0" title="Bazuca RPG-7">
+    <svg viewBox="0 0 24 24"><use href="#icon-bazooka"/></svg>
+    <span class="wp-num">1</span>
+  </button>
+  <button class="btn-icon dock-btn" id="wp-1" title="Mazo Pesado">
+    <svg viewBox="0 0 24 24"><use href="#icon-hammer"/></svg>
+    <span class="wp-num">2</span>
+  </button>
+  <button class="btn-icon dock-btn" id="wp-2" title="C4 Detonador">
+    <svg viewBox="0 0 24 24"><use href="#icon-c4"/></svg>
+    <span class="wp-num">3</span>
+  </button>
+  <button class="btn-icon dock-btn" id="wp-3" title="Escopeta de Asalto">
+    <svg viewBox="0 0 24 24"><use href="#icon-shotgun"/></svg>
+    <span class="wp-num">4</span>
+  </button>
+</div>
+
+<!-- Controles táctiles en pantalla -->
+<div id="touch-actions">
+  <button class="btn-icon" id="btn-jump" title="Saltar">
+    <svg viewBox="0 0 24 24"><use href="#icon-jump-thrust"/></svg>
+  </button>
+  <button class="btn-icon" id="btn-fire" title="Disparar">
+    <svg viewBox="0 0 24 24"><use href="#icon-crosshair-burst"/></svg>
+  </button>
+</div>
+
+<!-- Menú de Inicio -->
+<div id="menu">
+  <div class="menu-card">
+    <h1 class="menu-title">
+      <svg style="width:28px;height:28px;fill:#ff451a" viewBox="0 0 24 24"><use href="#icon-flame"/></svg>
+      Demolición 3D Realista
+    </h1>
+    <div class="menu-subtitle">Simulador de Físicas de Derrumbe y Ciudad Vóxel Completa</div>
+
+    <div class="features-list">
+      <div class="feat-item">
+        <svg viewBox="0 0 24 24"><use href="#icon-check"/></svg>
+        <div><strong>Físicas de Carga y Voladizo:</strong> Los pisos y techos ya no flotan sin soporte. Si vuelas los cimientos, la estructura entera colapsa bajo su propio peso.</div>
+      </div>
+      <div class="feat-item">
+        <svg viewBox="0 0 24 24"><use href="#icon-check"/></svg>
+        <div><strong>Derrumbe en Masa y Estallido:</strong> Los edificios caen con aceleración gravitacional y al tocar el suelo revientan en escombros proyectados en 3D.</div>
+      </div>
+      <div class="feat-item">
+        <svg viewBox="0 0 24 24"><use href="#icon-check"/></svg>
+        <div><strong>Escombros Sólidos e Interactivos:</strong> Puedes caminar por encima de los pedazos derrumbados, escalarlos y patearlos al moverte.</div>
+      </div>
+      <div class="feat-item">
+        <svg viewBox="0 0 24 24"><use href="#icon-check"/></svg>
+        <div><strong>Cohete Bazuca 3D Visible:</strong> Misil balístico visible en vuelo con estela de fuego y humo en tiempo real.</div>
+      </div>
+      <div class="feat-item">
+        <svg viewBox="0 0 24 24"><use href="#icon-check"/></svg>
+        <div><strong>Metrópolis Completa:</strong> Rascacielos con vidrio, chimenea industrial, puente con río, gasolinera con reacción en cadena, buses y carros.</div>
+      </div>
+    </div>
+
+    <button id="btn-start">COMENZAR DEMOLICIÓN</button>
+  </div>
+</div>
+
+<!-- Three.js: Local con Fallback CDN automático -->
+<script src="three.min.js"></script>
+<script>
+if (!window.THREE) {
+  document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>');
+}
+</script>
+
+<script>
+/* =========================================================================
+   SISTEMA DE DEMOLICIÓN 3D CON FÍSICAS ESTRUCTURALES Y CIUDAD COMPLETA
+   ========================================================================= */
+
+// Dimensiones de la Ciudad Vóxel (S = escala en metros de cada bloque)
+const S = 0.5;
+const W = 180, D = 180, H = 48, N = W * D * H;
+const CS = 20, CW = W / CS; // Chunks espaciales de 20x20
+const MAXD = 1800; // Máximo de escombros dinámicos con físicas
+const R = Math.random;
+const idx = (x, y, z) => (y * D + z) * W + x;
+const $ = id => document.getElementById(id);
+
+// --- Renderer & Escena Three.js ---
+const rd = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+rd.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+rd.setSize(window.innerWidth, window.innerHeight);
+rd.shadowMap.enabled = true;
+rd.shadowMap.type = THREE.BasicShadowMap;
+document.body.prepend(rd.domElement);
+
+const sc = new THREE.Scene();
+sc.background = new THREE.Color(0x8ec5fc);
+sc.fog = new THREE.FogExp2(0x8ec5fc, 0.009);
+
+const cam = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.05, 260);
+cam.rotation.order = 'YXZ';
+sc.add(cam);
+
+// Iluminación ambiental y solar
+const hemiLight = new THREE.HemisphereLight(0xffffff, 0x55606e, 0.85);
+sc.add(hemiLight);
+
+const sun = new THREE.DirectionalLight(0xfff3db, 1.15);
+sun.position.set(70, 110, 50);
+sun.castShadow = true;
+sun.shadow.mapSize.width = 1024;
+sun.shadow.mapSize.height = 1024;
+sun.shadow.camera.near = 10;
+sun.shadow.camera.far = 280;
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60;
+sun.shadow.camera.bottom = -60;
+sc.add(sun);
+
+// Suelo de concreto y pasto
+const gndGeo = new THREE.PlaneGeometry(800, 800);
+const gndMat = new THREE.MeshLambertMaterial({ color: 0x5b7051 });
+const gnd = new THREE.Mesh(gndGeo, gndMat);
+gnd.rotation.x = -Math.PI / 2;
+gnd.position.set((W * S) / 2, -0.01, (D * S) / 2);
+gnd.receiveShadow = true;
+sc.add(gnd);
+
+// Geometría y material instanciado para bloques
+const geo = new THREE.BoxGeometry(S, S, S);
+const mat = new THREE.MeshLambertMaterial();
+
+// Malla instanciada para escombros dinámicos (debris)
+const dm = new THREE.InstancedMesh(geo, mat, MAXD);
+dm.frustumCulled = false;
+dm.count = 0;
+dm.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+dm.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(MAXD * 3), 3);
+sc.add(dm);
+
+const DM = dm.instanceMatrix.array;
+const DC = dm.instanceColor.array;
+
+// Grilla Vóxel
+const grid = new Int32Array(N);
+const tmp = new Int32Array(N);
+const vis = new Uint8Array(N);
+const q = new Int32Array(N);
+
+let cnt = 0, total = 1, chunks = [], shake = 0;
+let dN = 0, dH = 0;
+
+// Sistema de Audio Sintetizado Procedural (Cero dependencias)
+const AudioEngine = {
+  ctx: null,
+  init() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (AC) this.ctx = new AC();
+    }
+    if (this.ctx && this.ctx.state === 'suspended') this.ctx.resume();
+  },
+  playBoom(intensity = 1) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    // Oscilador de graves / sub-bass
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(140 * intensity, now);
+    osc.frequency.exponentialRampToValueAtTime(24, now + 0.6 * intensity);
+    gain.gain.setValueAtTime(0.7 * intensity, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.7 * intensity);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.75 * intensity);
+
+    // Ruido blanco (explosión y crujido)
+    const bufSize = this.ctx.sampleRate * 0.45;
+    const buf = this.ctx.createBuffer(1, bufSize, this.ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < bufSize; i++) data[i] = (R() * 2 - 1) * Math.exp(-i / (bufSize * 0.25));
+    const noise = this.ctx.createBufferSource();
+    noise.buffer = buf;
+    const nGain = this.ctx.createGain();
+    nGain.gain.setValueAtTime(0.5 * intensity, now);
+    nGain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    noise.connect(nGain);
+    nGain.connect(this.ctx.destination);
+    noise.start(now);
+  },
+  playRocketLaunch() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(200, now);
+    osc.frequency.exponentialRampToValueAtTime(800, now + 0.25);
+    gain.gain.setValueAtTime(0.35, now);
+    gain.gain.linearRampToValueAtTime(0.01, now + 0.3);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.3);
+  },
+  playHammerHit() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(320, now);
+    osc.frequency.exponentialRampToValueAtTime(45, now + 0.18);
+    gain.gain.setValueAtTime(0.6, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.2);
+  },
+  playBeep() {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const osc = this.ctx.createOscillator();
+    const gain = this.ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, now);
+    gain.gain.setValueAtTime(0.2, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+    osc.connect(gain);
+    gain.connect(this.ctx.destination);
+    osc.start(now);
+    osc.stop(now + 0.09);
+  }
+};
+
+// Fabricación de Chunks espaciales para la ciudad
+function mkChunk(n, i, j) {
+  const k = Math.max(1, n);
+  const g = geo.clone();
+  g.boundingSphere = new THREE.Sphere(new THREE.Vector3((i + 0.5) * CS * S, (H * S) / 2, (j + 0.5) * CS * S), 15);
+  const m = new THREE.InstancedMesh(g, mat, k);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  m.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(k * 3), 3);
+  m.count = 0;
+  m.castShadow = true;
+  m.receiveShadow = true;
+  sc.add(m);
+  return { m, M: m.instanceMatrix.array, C: m.instanceColor.array, cell: new Int32Array(k), n: 0, d: 1 };
+}
+
+// Pintado Vóxel en buffer temporal
+function B(x0, y0, z0, x1, y1, z1, c) {
+  for (let y = y0; y < y1; y++) {
+    for (let z = z0; z < z1; z++) {
+      for (let x = x0; x < x1; x++) {
+        if (x < 0 || z < 0 || y < 0 || x >= W || z >= D || y >= H) continue;
+        const k = 0.92 + R() * 0.16;
+        tmp[idx(x, y, z)] =
+          (Math.min(255, ((c >> 16) & 255) * k) << 16) |
+          (Math.min(255, ((c >> 8) & 255) * k) << 8) |
+          Math.min(255, (c & 255) * k);
+      }
+    }
+  }
+}
+
+// Tallado hueco en vóxeles
+function X(x0, y0, z0, x1, y1, z1) {
+  for (let y = y0; y < y1; y++) {
+    for (let z = z0; z < z1; z++) {
+      for (let x = x0; x < x1; x++) {
+        if (x >= 0 && z >= 0 && y >= 0 && x < W && z < D && y < H) {
+          tmp[idx(x, y, z)] = -1;
+        }
+      }
+    }
+  }
+}
+
+/* =========================================================================
+   ARQUITECTURA DE LA CIUDAD (EDIFICIOS, RASCACIELOS, RÍO, GASOLINERA, CARROS)
+   ========================================================================= */
+
+// Paletas cromáticas de arquitectura
+const PALETTE_WALL = [0xd6cbb8, 0xb5634b, 0x8fa3b5, 0xc2a67a, 0x475569, 0xd0c4b4, 0x8a929b];
+const PALETTE_ROOF = [0x422820, 0x2b3846, 0x6e3223, 0x334139, 0x1f2937];
+const PALETTE_VEHICLE = [0xc92a2a, 0x1971c2, 0x2f9e44, 0xf08c00, 0x343a40, 0xf8f9fa, 0x7048e8];
+
+// 1. Rascacielos corporativo con fachada de vidrio y oficinas
+function buildSkyscraper(cx, cz, w, d, floors) {
+  const x0 = cx - (w >> 1), z0 = cz - (d >> 1), x1 = x0 + w, z1 = z0 + d;
+  const totalH = Math.min(H - 2, floors * 5 + 2);
+  // Columnas base de acero y hormigón
+  B(x0, 0, z0, x1, 1, z1, 0x334155);
+  // Estructura vertical con muros cortina de vidrio reflectante
+  B(x0, 1, z0, x1, totalH, z1, 0x1e293b);
+  X(x0 + 1, 1, z0 + 1, x1 - 1, totalH, z1 - 1);
+  // Pisos interiores
+  for (let f = 1; f < floors; f++) {
+    const y = f * 5;
+    B(x0 + 1, y, z0 + 1, x1 - 1, y + 1, z1 - 1, 0x475569);
+    // Paneles de vidrio exteriores
+    for (let x = x0 + 2; x < x1 - 2; x += 3) {
+      B(x, y + 1, z0, x + 2, y + 4, z0 + 1, 0x38bdf8); // Vidrio azul
+      B(x, y + 1, z1 - 1, x + 2, y + 4, z1, 0x38bdf8);
+    }
+  }
+  // Puerta de recepción y helipuerto en la azotea
+  X(cx - 2, 1, z1 - 1, cx + 2, 4, z1);
+  B(x0 - 1, totalH, z0 - 1, x1 + 1, totalH + 1, z1 + 1, 0x0f172a);
+  // Antena de telecomunicaciones en el techo
+  B(cx - 1, totalH + 1, cz - 1, cx + 1, totalH + 6, cz + 1, 0x94a3b8);
+  B(cx, totalH + 6, cz, cx + 1, totalH + 9, cz + 1, 0xef4444); // Luz baliza roja
+}
+
+// 2. Casa / Bloque residencial de apartamentos con tejado y chimenea
+function buildHouse(cx, cz, w, d, fl, wallCol, roofCol) {
+  const x0 = cx - (w >> 1), z0 = cz - (d >> 1), x1 = x0 + w, z1 = z0 + d;
+  const hh = fl * 6 + 1;
+  B(x0, 0, z0, x1, 1, z1, 0x64748b);
+  B(x0, 1, z0, x1, hh, z1, wallCol);
+  X(x0 + 1, 1, z0 + 1, x1 - 1, hh, z1 - 1);
+  // Pisos de madera
+  for (let f = 1; f < fl; f++) {
+    B(x0 + 1, f * 6, z0 + 1, x1 - 1, f * 6 + 1, z1 - 1, 0x92400e);
+  }
+  // Techo a dos aguas
+  B(x0 - 1, hh, z0 - 1, x1 + 1, hh + 1, z1 + 1, roofCol);
+  B(x0 + 1, hh + 1, z0 - 1, x1 - 1, hh + 2, z1 + 1, roofCol);
+  B(x0 + 3, hh + 2, z0 - 1, x1 - 3, hh + 3, z1 + 1, roofCol);
+  // Chimenea de ladrillo
+  B(x1 - 3, hh, z0 + 2, x1 - 1, hh + 5, z0 + 4, 0xb91c1c);
+  // Puerta principal
+  X(cx - 1, 1, z1 - 1, cx + 2, 5, z1);
+  // Ventanas
+  for (let f = 0; f < fl; f++) {
+    const y = f * 6 + 2;
+    X(x0 + 2, y, z1 - 1, x0 + 5, y + 3, z1);
+    X(x1 - 5, y, z1 - 1, x1 - 2, y + 3, z1);
+    X(x0 + 2, y, z0, x0 + 5, y + 3, z0 + 1);
+    X(x1 - 5, y, z0, x1 - 2, y + 3, z0 + 1);
+  }
+}
+
+// 3. Gran Chimenea industrial de ladrillos (¡Ideal para derribarla desde la base!)
+function buildIndustrialChimney(cx, cz, radius, height) {
+  for (let y = 0; y < height; y++) {
+    const r = Math.max(1.8, radius * (1 - (y / height) * 0.35));
+    for (let dz = -Math.ceil(r); dz <= Math.ceil(r); dz++) {
+      for (let dx = -Math.ceil(r); dx <= Math.ceil(r); dx++) {
+        const d = Math.hypot(dx, dz);
+        if (d <= r && d >= r - 1.2) {
+          const c = (y % 6 < 2) ? 0x991b1b : 0xd97706; // Anillos de seguridad blanco/rojo
+          tmp[idx(cx + dx, y, cz + dz)] = c;
+        }
+      }
+    }
+  }
+}
+
+// 4. Gasolinera con tanques de combustible explosivos
+function buildGasStation(cx, cz) {
+  // Techo marquesina flotante sostenida por 4 postes
+  B(cx - 10, 8, cz - 6, cx + 10, 9, cz + 6, 0xf1f5f9);
+  B(cx - 10, 9, cz - 6, cx + 10, 10, cz + 6, 0xdc2626); // Franja roja de marca
+  // 4 columnas de soporte
+  for (const ox of [-8, 7]) {
+    for (const oz of [-4, 4]) {
+      B(cx + ox, 0, cz + oz, cx + ox + 2, 8, cz + oz + 2, 0x94a3b8);
+    }
+  }
+  // Surtidores de combustible
+  for (const ox of [-4, 3]) {
+    B(cx + ox, 0, cz - 1, cx + ox + 2, 4, cz + 1, 0xdc2626); // Dispensador
+    B(cx + ox, 2, cz - 1, cx + ox + 2, 3, cz + 1, 0x0284c7); // Pantalla digital
+  }
+  // Tienda de conveniencia
+  B(cx - 8, 0, cz - 16, cx + 8, 6, cz - 9, 0xe2e8f0);
+  X(cx - 6, 1, cz - 9, cx + 6, 5, cz - 8); // Gran ventanal de tienda
+  // Tanques de reserva de gas (Explosivos!)
+  B(cx + 12, 0, cz - 14, cx + 16, 5, cz - 6, 0xfacc15); // Tanques amarillos de alta presión
+}
+
+// 5. Canal de agua con puente arqueado de piedra
+function buildCanalAndBridge(zStart, zEnd) {
+  // Agua y zanja
+  const canalW = 16, canalMid = 90;
+  for (let z = zStart; z < zEnd; z++) {
+    for (let x = canalMid - (canalW >> 1); x < canalMid + (canalW >> 1); x++) {
+      // Bloques de agua azul
+      tmp[idx(x, 0, z)] = 0x0284c7;
+    }
+    // Muros de contención del canal
+    tmp[idx(canalMid - (canalW >> 1) - 1, 0, z)] = 0x475569;
+    tmp[idx(canalMid - (canalW >> 1) - 1, 1, z)] = 0x64748b;
+    tmp[idx(canalMid + (canalW >> 1), 0, z)] = 0x475569;
+    tmp[idx(canalMid + (canalW >> 1), 1, z)] = 0x64748b;
+  }
+  // Puente arqueado sobre el canal
+  const bz = 90, bWidth = 8;
+  for (let x = canalMid - (canalW >> 1) - 2; x <= canalMid + (canalW >> 1) + 2; x++) {
+    const archH = Math.max(1, 4 - Math.abs(x - canalMid) * 0.35 | 0);
+    for (let z = bz - (bWidth >> 1); z <= bz + (bWidth >> 1); z++) {
+      B(x, archH, z, x + 1, archH + 1, z + 1, 0x334155);
+      // Barandillas del puente
+      if (z === bz - (bWidth >> 1) || z === bz + (bWidth >> 1)) {
+        B(x, archH + 1, z, x + 1, archH + 2, z + 1, 0x94a3b8);
+      }
+    }
+  }
+}
+
+// 6. Vehículos: Carros y Autobús Urbano
+function buildVehicle(x, z, dir, color, isBus = false) {
+  const bb = (l0, l1, w0, w1, y0, y1, col, clear) => {
+    (clear || B)(
+      ...(dir ? [x + w0, y0, z + l0, x + w1, y1, z + l1] : [x + l0, y0, z + w0, x + l1, y1, z + w1]),
+      col
+    );
+  };
+  if (isBus) {
+    bb(-12, 12, -3, 3, 1, 8, color);
+    bb(-11, 11, -2, 2, 2, 7, 0, X); // Interior hueco
+    // Ventanas de pasajeros
+    for (let l = -10; l < 10; l += 4) bb(l, l + 3, -3, 3, 4, 6, 0, X);
+    // Ruedas negras
+    for (const l of [-9, -4, 5, 9]) {
+      for (const w of [-3, 2]) bb(l, l + 3, w, w + 1, 0, 2, 0x1e293b);
+    }
+  } else {
+    // Sedán / deportivo
+    bb(-5, 5, -2, 2, 1, 3, color);
+    bb(-2, 3, -2, 2, 3, 5, 0x38bdf8); // Vidrios de cabina
+    // Faros
+    bb(4, 5, -2, -1, 2, 3, 0xfef08a);
+    bb(4, 5, 1, 2, 2, 3, 0xfef08a);
+    // Ruedas
+    for (const l of [-4, 2]) {
+      for (const w of [-2, 1]) bb(l, l + 2, w, w + 1, 0, 2, 0x1e293b);
+    }
+  }
+}
+
+// 7. Accesorios urbanos: Farolas, Semáforos e Hidrantes
+function buildStreetProps() {
+  for (let i = 24; i < W - 20; i += 32) {
+    for (let j = 24; j < D - 20; j += 32) {
+      // Farola urbana con luminaria brillante
+      B(i, 0, j, i + 1, 7, j + 1, 0x334155);
+      B(i, 7, j, i + 2, 8, j + 1, 0x334155);
+      B(i + 2, 7, j, i + 3, 8, j + 1, 0xfef08a); // Bombilla encendida
+      // Hidrante de bomberos rojo
+      B(i + 2, 0, j + 2, i + 3, 2, j + 3, 0xef4444);
+    }
+  }
+}
+
+// 8. Trazado de Carreteras con señalización de asfalto
+function buildRoadNetwork() {
+  // Avenidas principales con líneas peatonales y divisorias
+  for (let r = 1; r < 5; r++) {
+    const rx = r * 34;
+    // Asfalto
+    B(rx - 4, 0, 0, rx + 4, 1, D, 0x1e293b);
+    B(0, 0, rx - 4, W, 1, rx + 4, 0x1e293b);
+    // Líneas discontinuas centrales
+    for (let p = 0; p < D; p += 6) {
+      B(rx, 1, p, rx + 1, 2, p + 3, 0xfacc15); // Amarillo
+      B(p, 1, rx, p + 3, 2, rx + 1, 0xfacc15);
+    }
+  }
+}
+
+// Generación Procedural de la Metrópolis
+function generateCity() {
+  tmp.fill(-1);
+  buildRoadNetwork();
+  buildCanalAndBridge(0, D);
+  buildStreetProps();
+
+  // Matriz de distritos urbanos
+  const gridBlocks = [
+    ['sky', 'hou', 'gas', 'hou', 'ind'],
+    ['hou', 'sky', 'hou', 'hou', 'hou'],
+    ['ind', 'hou', 'sky', 'gas', 'sky'],
+    ['hou', 'gas', 'hou', 'ind', 'hou'],
+    ['sky', 'hou', 'ind', 'hou', 'sky']
+  ];
+
+  for (let gy = 0; gy < 5; gy++) {
+    for (let gx = 0; gx < 5; gx++) {
+      const type = gridBlocks[gy][gx];
+      const cx = 18 + gx * 34;
+      const cz = 18 + gy * 34;
+
+      if (type === 'sky') {
+        buildSkyscraper(cx, cz, 16, 16, 6 + (R() * 4 | 0));
+        if (R() < 0.7) buildVehicle(cx + 10, cz, 1, PALETTE_VEHICLE[R() * PALETTE_VEHICLE.length | 0]);
+      } else if (type === 'hou') {
+        buildHouse(cx, cz, 14, 12, 1 + (R() * 2 | 0), PALETTE_WALL[R() * PALETTE_WALL.length | 0], PALETTE_ROOF[R() * PALETTE_ROOF.length | 0]);
+        if (R() < 0.6) buildVehicle(cx, cz + 8, 0, PALETTE_VEHICLE[R() * PALETTE_VEHICLE.length | 0]);
+      } else if (type === 'gas') {
+        buildGasStation(cx, cz);
+      } else if (type === 'ind') {
+        buildIndustrialChimney(cx, cz, 3.5, 34);
+        if (R() < 0.5) buildVehicle(cx + 8, cz + 8, 0, PALETTE_VEHICLE[0], true); // Autobús
+      }
+    }
+  }
+
+  // Chunks espaciales
+  chunks.forEach(c => {
+    sc.remove(c.m);
+    c.m.geometry.dispose();
+    c.m.dispose();
+  });
+  chunks = [];
+
+  const k = new Int32Array(CW * CW);
+  for (let y = 0; y < H; y++) {
+    for (let z = 0; z < D; z++) {
+      for (let x = 0; x < W; x++) {
+        if (tmp[idx(x, y, z)] >= 0) k[((z / CS) | 0) * CW + ((x / CS) | 0)]++;
+      }
+    }
+  }
+
+  for (let j = 0; j < CW; j++) {
+    for (let i = 0; i < CW; i++) {
+      chunks.push(mkChunk(k[j * CW + i], i, j));
+    }
+  }
+
+  grid.fill(-1);
+  cnt = 0;
+  for (let y = 0; y < H; y++) {
+    for (let z = 0; z < D; z++) {
+      for (let x = 0; x < W; x++) {
+        const c = idx(x, y, z), h = tmp[c];
+        if (h < 0) continue;
+        const ch = chunks[((z / CS) | 0) * CW + ((x / CS) | 0)];
+        const i = ch.n++, o = i * 16;
+        ch.M[o] = ch.M[o + 5] = ch.M[o + 10] = ch.M[o + 15] = 1;
+        ch.M[o + 12] = (x + 0.5) * S;
+        ch.M[o + 13] = (y + 0.5) * S;
+        ch.M[o + 14] = (z + 0.5) * S;
+        ch.C[i * 3] = ((h >> 16) & 255) / 255;
+        ch.C[i * 3 + 1] = ((h >> 8) & 255) / 255;
+        ch.C[i * 3 + 2] = (h & 255) / 255;
+        ch.cell[i] = c;
+        grid[c] = i;
+        cnt++;
+      }
+    }
+  }
+
+  total = cnt;
+  dN = 0;
+  dH = 0;
+  bombs.forEach(b => sc.remove(b.m));
+  bombs.length = 0;
+  rockets.forEach(r => sc.remove(r.mesh));
+  rockets.length = 0;
+  fallingClusters.forEach(fc => sc.remove(fc.mesh));
+  fallingClusters.length = 0;
+
+  Object.assign(P, { x: 36, y: 0.1, z: 88, vy: 0, yaw: 0, pit: -0.05 });
+  syncChunks();
+}
+
+function syncChunks() {
+  for (const ch of chunks) {
+    if (ch.d) {
+      ch.m.count = ch.n;
+      ch.m.visible = ch.n > 0;
+      ch.m.instanceMatrix.needsUpdate = true;
+      ch.m.instanceColor.needsUpdate = true;
+      ch.d = 0;
+    }
+  }
+  dm.count = dN;
+  dm.instanceColor.needsUpdate = true;
+}
+
+function remVoxel(c, ch) {
+  const i = grid[c], l = --ch.n;
+  grid[c] = -1;
+  if (i !== l) {
+    ch.M.copyWithin(i * 16, l * 16, l * 16 + 16);
+    ch.C.copyWithin(i * 3, l * 3, l * 3 + 3);
+    const lc = ch.cell[l];
+    ch.cell[i] = lc;
+    grid[lc] = i;
+  }
+  ch.d = 1;
+  cnt--;
+}
+
+const isSolidGrid = (x, y, z) => {
+  if (y < 0) return true;
+  const gx = Math.floor(x / S), gy = Math.floor(y / S), gz = Math.floor(z / S);
+  if (gx < 0 || gz < 0 || gx >= W || gz >= D || gy >= H) return false;
+  return grid[idx(gx, gy, gz)] >= 0;
+};
+
+/* =========================================================================
+   FÍSICAS DE ESCOMBROS DINÁMICOS (SÓLIDOS, CAMINABLES Y EMPUJABLES)
+   ========================================================================= */
+
+const dp = new Float32Array(MAXD * 3);
+const dv = new Float32Array(MAXD * 3);
+const dr = new Float32Array(MAXD * 3);
+const dw = new Float32Array(MAXD * 3);
+const ds = new Float32Array(MAXD);
+const da = new Uint8Array(MAXD); // 1 = activo con movimiento, 0 = en reposo sólido
+
+function spawnDebris(x, y, z, r, g, b, vx, vy, vz, size = 0.5) {
+  const i = dH;
+  dH = (dH + 1) % MAXD;
+  if (dN < MAXD) dN++;
+  const k = i * 3;
+  dp[k] = x; dp[k + 1] = y; dp[k + 2] = z;
+  dv[k] = vx; dv[k + 1] = vy; dv[k + 2] = vz;
+  for (let j = 0; j < 3; j++) {
+    dr[k + j] = R() * 6.28;
+    dw[k + j] = (R() - 0.5) * 12;
+  }
+  ds[i] = size;
+  da[i] = 1;
+  DC[k] = r; DC[k + 1] = g; DC[k + 2] = b;
+}
+
+const _e = new THREE.Euler(), _q = new THREE.Quaternion(), _p = new THREE.Vector3(), _s = new THREE.Vector3(), _m = new THREE.Matrix4();
+
+function updateDebris(dt) {
+  let needsUpdate = false;
+  for (let i = 0; i < dN; i++) {
+    const k = i * 3;
+    if (da[i]) {
+      needsUpdate = true;
+      const h = ds[i] * S * 0.5;
+      // Gravedad
+      dv[k + 1] = Math.max(-28, dv[k + 1] - 22 * dt);
+
+      let x = dp[k] + dv[k] * dt;
+      let y = dp[k + 1] + dv[k + 1] * dt;
+      let z = dp[k + 2] + dv[k + 2] * dt;
+
+      // Colisión con suelo y otros bloques
+      if (dv[k + 1] < 0 && (y - h <= 0.05 || isSolidGrid(x, y - h, z))) {
+        y = Math.max(h, (Math.floor((y - h) / S) + 1) * S + h);
+        if (dv[k + 1] < -3) {
+          // Rebote con fricción
+          dv[k + 1] *= -0.28;
+          dv[k] *= 0.65;
+          dv[k + 2] *= 0.65;
+        } else {
+          // Se asienta en el suelo como escombro sólido
+          da[i] = 0;
+          dv[k] = dv[k + 1] = dv[k + 2] = 0;
+        }
+      } else if (isSolidGrid(x, y, z)) {
+        x = dp[k]; z = dp[k + 2];
+        dv[k] *= -0.3; dv[k + 2] *= -0.3;
+      }
+
+      dp[k] = x; dp[k + 1] = y; dp[k + 2] = z;
+      dr[k] += dw[k] * dt; dr[k + 1] += dw[k + 1] * dt; dr[k + 2] += dw[k + 2] * dt;
+    }
+
+    _e.set(dr[k], dr[k + 1], dr[k + 2]);
+    _q.setFromEuler(_e);
+    _p.set(dp[k], dp[k + 1], dp[k + 2]);
+    _s.setScalar(ds[i]);
+    _m.compose(_p, _q, _s);
+    _m.toArray(DM, i * 16);
+  }
+  if (needsUpdate) dm.instanceMatrix.needsUpdate = true;
+}
+
+/* =========================================================================
+   FÍSICAS ESTRUCTURALES Y COLAPSO EN MASA (CANTILEVER Y DERRUMBE REALISTA)
+   ========================================================================= */
+
+// Almacén de Cuerpos Rígidos de Edificios Colapsando en Masa
+const fallingClusters = [];
+const vertSupport = new Uint8Array(N);
+const distFromCol = new Uint8Array(N);
+
+class FallingCluster {
+  constructor(voxels) {
+    this.voxels = voxels; // Array de {x, y, z, r, g, b}
+    this.vel = new THREE.Vector3((R() - 0.5) * 1.8, -0.6, (R() - 0.5) * 1.8);
+    this.angVel = new THREE.Vector3((R() - 0.5) * 1.2, (R() - 0.5) * 0.6, (R() - 0.5) * 1.2);
+    this.alive = true;
+
+    // Calcular centro de masa geométrico del trozo desprendido
+    let cx = 0, cy = 0, cz = 0;
+    for (let i = 0; i < voxels.length; i++) {
+      cx += voxels[i].x; cy += voxels[i].y; cz += voxels[i].z;
+    }
+    this.center = new THREE.Vector3(
+      (cx / voxels.length + 0.5) * S,
+      (cy / voxels.length + 0.5) * S,
+      (cz / voxels.length + 0.5) * S
+    );
+
+    // Malla combinada instanciada para que el edificio caiga de forma realista como una pieza entera
+    const k = voxels.length;
+    this.mesh = new THREE.InstancedMesh(geo, mat, k);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(k * 3), 3);
+    this.mesh.castShadow = true;
+    this.mesh.receiveShadow = true;
+
+    const m = new THREE.Matrix4(), p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(1, 1, 1);
+    for (let i = 0; i < k; i++) {
+      const v = voxels[i];
+      p.set((v.x + 0.5) * S - this.center.x, (v.y + 0.5) * S - this.center.y, (v.z + 0.5) * S - this.center.z);
+      m.compose(p, q, s);
+      this.mesh.setMatrixAt(i, m);
+      this.mesh.setColorAt(i, new THREE.Color(v.r, v.g, v.b));
+    }
+    this.mesh.instanceMatrix.needsUpdate = true;
+    this.mesh.instanceColor.needsUpdate = true;
+    this.mesh.position.copy(this.center);
+    sc.add(this.mesh);
+  }
+
+  update(dt) {
+    if (!this.alive) return;
+    // Aceleración de gravedad realista (g = 26 m/s^2)
+    this.vel.y -= 26 * dt;
+    this.mesh.position.addScaledVector(this.vel, dt);
+    this.mesh.rotation.x += this.angVel.x * dt;
+    this.mesh.rotation.y += this.angVel.y * dt;
+    this.mesh.rotation.z += this.angVel.z * dt;
+
+    // Colisión catastrófica cuando la estructura toca el suelo o restos
+    if (this.mesh.position.y <= 1.8 || this.vel.y < -38) {
+      this.shatterImpact();
+    }
+  }
+
+  // Estallido al colisionar: revienta en miles de pedazos volando por la inercia del impacto
+  shatterImpact() {
+    this.alive = false;
+    sc.remove(this.mesh);
+    this.mesh.geometry.dispose();
+    this.mesh.dispose();
+
+    const worldPos = this.mesh.position;
+    const impactSpeed = Math.abs(this.vel.y);
+    AudioEngine.playBoom(Math.min(2.0, 0.9 + impactSpeed * 0.05));
+    shake = Math.min(1.5, shake + 0.7);
+
+    // Dispersión física violenta de los bloques en escombros interactivos
+    for (let i = 0; i < this.voxels.length; i++) {
+      if (R() < 0.75) {
+        const v = this.voxels[i];
+        const vx = (this.vel.x + (R() - 0.5) * 10);
+        const vy = Math.abs(R() * 8 + impactSpeed * 0.3);
+        const vz = (this.vel.z + (R() - 0.5) * 10);
+        spawnDebris(
+          worldPos.x + (v.x * S - this.center.x) * 0.95,
+          Math.max(0.4, worldPos.y + (v.y * S - this.center.y) * 0.95),
+          worldPos.z + (v.z * S - this.center.z) * 0.95,
+          v.r, v.g, v.b,
+          vx, vy, vz,
+          0.45 + R() * 0.35
+        );
+      }
+    }
+    flashExplosion(worldPos, 4.5);
+  }
+}
+
+// ALGORITMO AVANZADO DE FÍSICA ESTRUCTURAL:
+// 1. Identifica qué columnas nacen directamente del suelo firme (y = 0).
+// 2. Calcula la distancia de voladizo (cantilever): un piso o techo no puede
+//    extenderse más de 3 bloques en el aire sin soporte vertical continuo.
+// 3. Verifica capacidad de carga: columnas delgadas con peso excesivo colapsan.
+// 4. Todo lo que no soporte la carga se desprende como FallingCluster realista.
+function settlePhysics() {
+  vertSupport.fill(0);
+  distFromCol.fill(255);
+
+  let qHead = 0, qTail = 0;
+
+  // Paso 1: Encontrar pilares directamente soportados desde el suelo (y = 0)
+  for (let x = 0; x < W; x++) {
+    for (let z = 0; z < D; z++) {
+      for (let y = 0; y < H; y++) {
+        const c = idx(x, y, z);
+        if (grid[c] < 0) break; // Si hay hueco en la base vertical, deja de ser pilar continuo
+        vertSupport[c] = 1;
+        distFromCol[c] = 0;
+        q[qTail++] = c;
+      }
+    }
+  }
+
+  // Paso 2: Propagación BFS para calcular voladizo (distancia horizontal desde pilares)
+  const nbX = [1, -1, 0, 0, 0, 0];
+  const nbY = [0, 0, 1, -1, 0, 0];
+  const nbZ = [0, 0, 0, 0, 1, -1];
+
+  const MAX_CANTILEVER = 3; // Máximo voladizo físico permitido (1.5 metros)
+
+  while (qHead < qTail) {
+    const c = q[qHead++];
+    const cx = c % W;
+    const cz = ((c / W) | 0) % D;
+    const cy = (c / (W * D)) | 0;
+    const curDist = distFromCol[c];
+
+    for (let i = 0; i < 6; i++) {
+      const nx = cx + nbX[i], ny = cy + nbY[i], nz = cz + nbZ[i];
+      if (nx < 0 || nx >= W || nz < 0 || nz >= D || ny < 0 || ny >= H) continue;
+
+      const nc = idx(nx, ny, nz);
+      if (grid[nc] < 0) continue;
+
+      // El soporte vertical no añade penalización de voladizo; el horizontal sí
+      const isHoriz = (nx !== cx || nz !== cz);
+      const nextDist = isHoriz ? curDist + 1 : curDist;
+
+      if (nextDist < distFromCol[nc] && nextDist <= MAX_CANTILEVER) {
+        distFromCol[nc] = nextDist;
+        q[qTail++] = nc;
+      }
+    }
+  }
+
+  // Paso 3: Extraer todos los bloques que excedieron el voladizo o perdieron soporte
+  const detachedVoxels = [];
+  for (const ch of chunks) {
+    for (let i = ch.n - 1; i >= 0; i--) {
+      const c = ch.cell[i];
+      if (distFromCol[c] <= MAX_CANTILEVER) continue; // Estructuralmente seguro
+
+      const x = c % W;
+      const z = ((c / W) | 0) % D;
+      const y = (c / (W * D)) | 0;
+
+      detachedVoxels.push({
+        x, y, z,
+        r: ch.C[i * 3],
+        g: ch.C[i * 3 + 1],
+        b: ch.C[i * 3 + 2]
+      });
+
+      remVoxel(c, ch);
+    }
+  }
+
+  if (detachedVoxels.length === 0) return;
+
+  // Banner y sonido de alerta de colapso en tiempo real
+  const alertEl = $('collapse-alert');
+  alertEl.classList.add('show');
+  setTimeout(() => alertEl.classList.remove('show'), 2600);
+
+  // Paso 4: Crear cuerpos rígidos de derrumbe en masa (Falling Clusters)
+  // Agrupar en racimos de hasta 120 bloques para que caigan con física realista
+  const batchSize = 100;
+  for (let i = 0; i < detachedVoxels.length; i += batchSize) {
+    const clusterSlice = detachedVoxels.slice(i, i + batchSize);
+    fallingClusters.push(new FallingCluster(clusterSlice));
+  }
+
+  shake = Math.min(1.4, shake + 0.55);
+}
+
+/* =========================================================================
+   EXPLOSIONES Y DESTRUCCIÓN DINÁMICA
+   ========================================================================= */
+
+const fx = [], bombs = [];
+const sphereGeo = new THREE.SphereGeometry(1, 14, 10);
+
+function flashExplosion(p, r) {
+  const m = new THREE.Mesh(
+    sphereGeo,
+    new THREE.MeshBasicMaterial({ color: 0xff7700, transparent: true, opacity: 0.9, fog: false })
+  );
+  m.position.copy(p);
+  m.scale.setScalar(r * 0.4);
+  sc.add(m);
+  fx.push({ m, t: 0, r });
+}
+
+function triggerExplosion(p, r, pw, debrisChance, sh, isChainReaction = false) {
+  AudioEngine.playBoom(isChainReaction ? 1.8 : 1.2);
+  // Reactivar escombros en el suelo cercanos a la onda expansiva
+  for (let i = 0; i < dN; i++) {
+    const k = i * 3;
+    const dx = dp[k] - p.x, dy = dp[k + 1] - p.y, dz = dp[k + 2] - p.z;
+    const d2 = dx * dx + dy * dy + dz * dz;
+    if (d2 < (r * 2) * (r * 2)) {
+      da[i] = 1;
+      const d = Math.sqrt(d2) || 1;
+      dv[k] += (dx / d) * (pw * 0.8);
+      dv[k + 1] += Math.abs(dy / d) * pw + 4;
+      dv[k + 2] += (dz / d) * (pw * 0.8);
+    }
+  }
+
+  const cx = p.x / S, cy = p.y / S, cz = p.z / S, rc = r / S, r2 = rc * rc;
+  let hitGasTanks = false;
+
+  for (let y = Math.max(0, Math.floor(cy - rc)); y <= Math.min(H - 1, Math.ceil(cy + rc)); y++) {
+    for (let z = Math.max(0, Math.floor(cz - rc)); z <= Math.min(D - 1, Math.ceil(cz + rc)); z++) {
+      for (let x = Math.max(0, Math.floor(cx - rc)); x <= Math.min(W - 1, Math.ceil(cx + rc)); x++) {
+        const dx = x + 0.5 - cx, dy = y + 0.5 - cy, dz = z + 0.5 - cz;
+        const d2 = dx * dx + dy * dy + dz * dz;
+        if (d2 > r2 * (0.85 + R() * 0.2)) continue;
+
+        const c = idx(x, y, z), i = grid[c];
+        if (i < 0) continue;
+        const ch = chunks[((z / CS) | 0) * CW + ((x / CS) | 0)];
+
+        // Comprobar si golpeó un tanque de gasolina (amarillo 0xfacc15) para reacción en cadena
+        const rCol = ch.C[i * 3], gCol = ch.C[i * 3 + 1];
+        if (rCol > 0.8 && gCol > 0.7) hitGasTanks = true;
+
+        if (R() < debrisChance) {
+          const d = Math.sqrt(d2) || 1;
+          const s = pw * (0.6 + R() * 0.7) * (1 - (d / rc) * 0.4);
+          spawnDebris(
+            (x + 0.5) * S, (y + 0.5) * S, (z + 0.5) * S,
+            ch.C[i * 3], ch.C[i * 3 + 1], ch.C[i * 3 + 2],
+            (dx / d) * s, (dy / d) * s + 3.5, (dz / d) * s,
+            0.5 + R() * 0.3
+          );
+        }
+        remVoxel(c, ch);
+      }
+    }
+  }
+
+  settlePhysics();
+  syncChunks();
+  flashExplosion(p, r);
+  shake = Math.min(1.4, shake + sh);
+
+  // ¡Reacción en cadena si explota la gasolinera!
+  if (hitGasTanks && !isChainReaction) {
+    setTimeout(() => {
+      triggerExplosion(
+        new THREE.Vector3(p.x + (R() - 0.5) * 6, p.y + 2, p.z + (R() - 0.5) * 6),
+        8.5, 24, 0.7, 1.2, true
+      );
+    }, 280);
+  }
+}
+
+/* =========================================================================
+   RAYO TRAVERSAL DDA POR VÓXELES
+   ========================================================================= */
+
+function raycastGrid(o, d, maxReach) {
+  const px = o.x / S, py = o.y / S, pz = o.z / S, m = maxReach / S;
+  let gx = Math.floor(px), gy = Math.floor(py), gz = Math.floor(pz);
+  const sx = d.x > 0 ? 1 : -1, sy = d.y > 0 ? 1 : -1, sz = d.z > 0 ? 1 : -1;
+  const dx = Math.abs(1 / (d.x || 1e-9)), dy = Math.abs(1 / (d.y || 1e-9)), dz = Math.abs(1 / (d.z || 1e-9));
+  let tx = (sx > 0 ? gx + 1 - px : px - gx) * dx;
+  let ty = (sy > 0 ? gy + 1 - py : py - gy) * dy;
+  let tz = (sz > 0 ? gz + 1 - pz : pz - gz) * dz;
+  let t = 0, hit = null;
+
+  for (let n = 0; n < 1500; n++) {
+    if (gx >= 0 && gx < W && gy >= 0 && gy < H && gz >= 0 && gz < D && grid[idx(gx, gy, gz)] >= 0) {
+      hit = t;
+      break;
+    }
+    if (tx < ty && tx < tz) { t = tx; tx += dx; gx += sx; }
+    else if (ty < tz) { t = ty; ty += dy; gy += sy; }
+    else { t = tz; tz += dz; gz += sz; }
+    if (t > m) break;
+  }
+
+  const tg = d.y < 0 ? -py / d.y : 1e9;
+  if (hit !== null && hit <= tg) return { t: hit * S, isVoxel: true };
+  if (tg <= m) return { t: tg * S, isVoxel: false };
+  return null;
+}
+
+/* =========================================================================
+   SISTEMA DE COHETES 3D VISIBLES PARA LA BAZUCA
+   ========================================================================= */
+
+const rockets = [];
+
+class RocketProjectile {
+  constructor(startPos, direction) {
+    this.pos = startPos.clone();
+    this.dir = direction.clone().normalize();
+    this.speed = 48; // m/s
+    this.life = 4.0;
+
+    // Malla 3D del misil (Cuerpo plateado, ojiva y 4 aletas)
+    this.mesh = new THREE.Group();
+    // Cuerpo
+    const bodyGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.55, 8);
+    const bodyMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+    const body = new THREE.Mesh(bodyGeo, bodyMat);
+    body.rotation.x = Math.PI / 2;
+    this.mesh.add(body);
+    // Ojiva cónica delantera
+    const warheadGeo = new THREE.ConeGeometry(0.08, 0.22, 8);
+    const warheadMat = new THREE.MeshLambertMaterial({ color: 0x991b1b });
+    const warhead = new THREE.Mesh(warheadGeo, warheadMat);
+    warhead.position.z = -0.36;
+    warhead.rotation.x = -Math.PI / 2;
+    this.mesh.add(warhead);
+    // Fuego del motor trasero
+    const flameGeo = new THREE.ConeGeometry(0.07, 0.35, 6);
+    const flameMat = new THREE.MeshBasicMaterial({ color: 0xffa500 });
+    this.flame = new THREE.Mesh(flameGeo, flameMat);
+    this.flame.position.z = 0.42;
+    this.flame.rotation.x = Math.PI / 2;
+    this.mesh.add(this.flame);
+
+    this.mesh.position.copy(this.pos);
+    this.mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, -1), this.dir);
+    sc.add(this.mesh);
+
+    AudioEngine.playRocketLaunch();
+  }
+
+  update(dt) {
+    this.life -= dt;
+    if (this.life <= 0) {
+      this.explode();
+      return false;
+    }
+
+    const stepDist = this.speed * dt;
+    const nextPos = this.pos.clone().addScaledVector(this.dir, stepDist);
+
+    // Detección de colisión con vóxeles o suelo
+    const r = raycastGrid(this.pos, this.dir, stepDist);
+    if (r) {
+      this.pos.addScaledVector(this.dir, r.t);
+      this.explode();
+      return false;
+    }
+
+    this.pos.copy(nextPos);
+    this.mesh.position.copy(this.pos);
+
+    // Estela de humo de propulsión
+    if (R() < 0.8) {
+      spawnDebris(
+        this.pos.x - this.dir.x * 0.4,
+        this.pos.y - this.dir.y * 0.4,
+        this.pos.z - this.dir.z * 0.4,
+        0.85, 0.85, 0.85,
+        (R() - 0.5) * 1, (R() - 0.5) * 1, (R() - 0.5) * 1,
+        0.25
+      );
+    }
+    return true;
+  }
+
+  explode() {
+    sc.remove(this.mesh);
+    triggerExplosion(this.pos, 4.8, 18, 0.65, 0.55);
+  }
+}
+
+/* =========================================================================
+   MODELADO 3D DE ARMAS EN PRIMERA PERSONA
+   ========================================================================= */
+
+const weaponHolder = new THREE.Group();
+weaponHolder.position.set(0.28, -0.28, -0.55);
+cam.add(weaponHolder);
+
+function makeBox(w, h, d, c, x, y, z) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), new THREE.MeshLambertMaterial({ color: c }));
+  m.position.set(x, y, z);
+  return m;
+}
+
+// 1. Bazuca RPG-7 Militar
+const bazookaGroup = new THREE.Group();
+bazookaGroup.add(makeBox(0.12, 0.12, 0.85, 0x3f4d38, 0, 0, 0)); // Tubo verde militar
+bazookaGroup.add(makeBox(0.18, 0.18, 0.16, 0x1f2937, 0, 0, 0.38)); // Difusor escape trasero
+bazookaGroup.add(makeBox(0.04, 0.16, 0.08, 0x111827, 0, -0.14, -0.15)); // Empuñadura
+bazookaGroup.add(makeBox(0.06, 0.08, 0.14, 0x0f172a, 0, 0.10, -0.10)); // Mira óptica
+bazookaGroup.add(makeBox(0.15, 0.15, 0.22, 0x991b1b, 0, 0, -0.48)); // Ojiva de cohete asomándose visible
+weaponHolder.add(bazookaGroup);
+
+// 2. Mazo pesado de demolición
+const hammerGroup = new THREE.Group();
+hammerGroup.add(makeBox(0.05, 0.72, 0.05, 0xb45309, 0, 0.08, 0)); // Mango ergonómico fibra
+hammerGroup.add(makeBox(0.26, 0.16, 0.16, 0x475569, 0, 0.38, 0)); // Cabeza acero forjado
+hammerGroup.add(makeBox(0.28, 0.14, 0.14, 0x94a3b8, 0, 0.38, 0)); // Placas de golpeo
+weaponHolder.add(hammerGroup);
+
+// 3. C4 Carga Táctica con temporizador
+const c4Group = new THREE.Group();
+c4Group.add(makeBox(0.18, 0.24, 0.12, 0x334155, 0, 0, 0)); // Bloque explosivo
+c4Group.add(makeBox(0.08, 0.08, 0.04, 0xef4444, 0, 0.04, 0.07)); // LED digital detonador
+c4Group.add(makeBox(0.02, 0.28, 0.02, 0x94a3b8, 0.06, 0.16, 0)); // Antena RF
+weaponHolder.add(c4Group);
+
+// 4. Escopeta de Asalto
+const shotgunGroup = new THREE.Group();
+shotgunGroup.add(makeBox(0.08, 0.10, 0.80, 0x1f2937, 0, 0, 0)); // Cañón pavonado
+shotgunGroup.add(makeBox(0.10, 0.08, 0.26, 0x7c2d12, 0, -0.06, 0.15)); // Guardamanos de madera
+shotgunGroup.add(makeBox(0.06, 0.16, 0.08, 0x111827, 0, -0.12, 0.30)); // Culata / empuñadura
+weaponHolder.add(shotgunGroup);
+
+const weaponMeshes = [bazookaGroup, hammerGroup, c4Group, shotgunGroup];
+let currentWeapon = 0, cooldown = 0, weaponKick = 0;
+
+function setWeapon(idx) {
+  currentWeapon = idx;
+  for (let i = 0; i < 4; i++) {
+    const btn = $(`wp-${i}`);
+    if (btn) btn.classList.toggle('on', i === idx);
+    if (weaponMeshes[i]) weaponMeshes[i].visible = (i === idx);
+  }
+}
+
+for (let i = 0; i < 4; i++) {
+  const b = $(`wp-${i}`);
+  if (b) {
+    b.onpointerdown = e => {
+      e.preventDefault();
+      setWeapon(i);
+    };
+  }
+}
+
+const _camDir = new THREE.Vector3(), _hitPoint = new THREE.Vector3();
+
+function fireWeapon() {
+  if (cooldown > 0) return;
+  AudioEngine.init();
+  weaponKick = 1;
+
+  cam.getWorldDirection(_camDir);
+
+  if (currentWeapon === 0) {
+    // Bazuca RPG-7: Lanza cohete 3D visible volando
+    cooldown = 0.95;
+    const spawnP = cam.position.clone().addScaledVector(_camDir, 0.7).add(new THREE.Vector3(0.2, -0.2, 0));
+    rockets.push(new RocketProjectile(spawnP, _camDir));
+  } else if (currentWeapon === 1) {
+    // Mazo: Golpe demoledor a corta distancia con chispas
+    cooldown = 0.28;
+    AudioEngine.playHammerHit();
+    const r = raycastGrid(cam.position, _camDir, 4.8);
+    if (r) {
+      _hitPoint.copy(cam.position).addScaledVector(_camDir, r.t);
+      triggerExplosion(_hitPoint, 1.25, 6.5, 0.8, 0.18);
+    }
+  } else if (currentWeapon === 2) {
+    // C4: Lanza carga explosiva con cuenta regresiva sonora
+    cooldown = 0.7;
+    const r = raycastGrid(cam.position, _camDir, 12);
+    if (r) {
+      _hitPoint.copy(cam.position).addScaledVector(_camDir, r.t - 0.15);
+      const m = makeBox(0.22, 0.32, 0.22, 0xef4444, 0, 0, 0);
+      m.position.copy(_hitPoint);
+      sc.add(m);
+      bombs.push({ m, t: 2.5, beepTimer: 0 });
+      AudioEngine.playBeep();
+    }
+  } else if (currentWeapon === 3) {
+    // Escopeta: Dispersión de perdigones cinéticos
+    cooldown = 0.42;
+    AudioEngine.playBoom(0.65);
+    for (let pellet = 0; pellet < 8; pellet++) {
+      const spreadDir = _camDir.clone().add(new THREE.Vector3((R() - 0.5) * 0.12, (R() - 0.5) * 0.12, (R() - 0.5) * 0.12)).normalize();
+      const r = raycastGrid(cam.position, spreadDir, 35);
+      if (r) {
+        _hitPoint.copy(cam.position).addScaledVector(spreadDir, r.t);
+        triggerExplosion(_hitPoint, 0.9, 4.0, 0.5, 0.12);
+      }
+    }
+  }
+}
+
+/* =========================================================================
+   FÍSICA DEL JUGADOR (CAMINAR SOBRE ESCOMBROS Y EMPUJARLOS)
+   ========================================================================= */
+
+const P = { x: 36, y: 0.1, z: 88, vy: 0, yaw: 0, pit: -0.05, grounded: false };
+
+// Comprueba colisión lateral con bloques de la grilla
+const checkWall = (x, y, z) => {
+  const r = 0.28;
+  for (let a = 0; a < 4; a++) {
+    const px = x + (a & 1 ? r : -r);
+    const pz = z + (a & 2 ? r : -r);
+    for (const h of [0.1, 0.9, 1.6]) {
+      if (isSolidGrid(px, y + h, pz)) return true;
+    }
+  }
+  return false;
+};
+
+// Comprueba apoyo en el suelo (tanto bloques de la grilla como escombros en el piso)
+const getGroundHeight = (x, z, currentY) => {
+  let maxY = 0;
+  const r = 0.28;
+  // Bloques de la grilla vóxel debajo de los pies
+  for (let a = 0; a < 4; a++) {
+    const px = x + (a & 1 ? r : -r);
+    const pz = z + (a & 2 ? r : -r);
+    const gx = Math.floor(px / S), gz = Math.floor(pz / S);
+    for (let gy = Math.min(H - 1, Math.floor((currentY + 0.6) / S)); gy >= 0; gy--) {
+      if (grid[idx(gx, gy, gz)] >= 0) {
+        maxY = Math.max(maxY, (gy + 1) * S);
+        break;
+      }
+    }
+  }
+
+  // FÍSICA DE CAMINAR SOBRE ESCOMBROS:
+  // Evalúa escombros asentados para poder pisarlos y escalarlos
+  for (let i = 0; i < dN; i++) {
+    const k = i * 3;
+    const dx = dp[k] - x, dz = dp[k + 2] - z;
+    const dist2 = dx * dx + dz * dz;
+    if (dist2 < 0.55 * 0.55) {
+      const debTop = dp[k + 1] + ds[i] * S * 0.5;
+      if (debTop <= currentY + 0.65) {
+        maxY = Math.max(maxY, debTop);
+      }
+    }
+  }
+  return maxY;
+};
+
+// Empujar escombros al caminar contra ellos
+function pushDebrisAtPlayer(moveX, moveZ) {
+  const moveLen = Math.hypot(moveX, moveZ);
+  if (moveLen < 0.001) return;
+  const ndx = moveX / moveLen, ndz = moveZ / moveLen;
+
+  for (let i = 0; i < dN; i++) {
+    const k = i * 3;
+    const dx = dp[k] - P.x, dz = dp[k + 2] - P.z;
+    const dist2 = dx * dx + dz * dz;
+    if (dist2 < 0.75 * 0.75 && Math.abs(dp[k + 1] - P.y) < 1.2) {
+      // Activar movimiento físico y aplicar impulso de pateo
+      da[i] = 1;
+      dv[k] += ndx * 5.5;
+      dv[k + 1] += 1.8;
+      dv[k + 2] += ndz * 5.5;
+    }
+  }
+}
+
+let stickTouch = null, lookTouch = null, isFiring = false, jumpRequest = false, gameStarted = false;
+const keyStates = {};
+
+function updatePlayer(dt) {
+  let ix = (stickTouch ? stickTouch.dx : 0) + (keyStates.KeyD ? 1 : 0) - (keyStates.KeyA ? 1 : 0);
+  let iz = (stickTouch ? stickTouch.dy : 0) + (keyStates.KeyS ? 1 : 0) - (keyStates.KeyW ? 1 : 0);
+  const len = Math.hypot(ix, iz);
+  if (len > 1) { ix /= len; iz /= len; }
+
+  const sn = Math.sin(P.yaw), cs = Math.cos(P.yaw);
+  const speed = 7.5 * dt;
+  const dx = (ix * cs + iz * sn) * speed;
+  const dz = (-ix * sn + iz * cs) * speed;
+
+  // Empujar escombros en la dirección de la marcha
+  pushDebrisAtPlayer(dx, dz);
+
+  // Movimiento horizontal con subida de escalones (Step up)
+  let nx = P.x + dx;
+  if (!checkWall(nx, P.y, P.z)) P.x = nx;
+  else if (P.grounded && !checkWall(nx, P.y + 0.55, P.z)) { P.x = nx; P.y += 0.55; }
+
+  let nz = P.z + dz;
+  if (!checkWall(P.x, P.y, nz)) P.z = nz;
+  else if (P.grounded && !checkWall(P.x, P.y + 0.55, nz)) { P.z = nz; P.y += 0.55; }
+
+  P.x = Math.max(2, Math.min(W * S - 2, P.x));
+  P.z = Math.max(2, Math.min(D * S - 2, P.z));
+
+  // Gravedad y apoyo en suelo/escombros
+  const groundY = getGroundHeight(P.x, P.z, P.y);
+  const onFloor = P.y <= groundY + 0.04;
+
+  if (onFloor && P.vy <= 0) {
+    P.y = groundY;
+    P.vy = 0;
+    P.grounded = true;
+    if (jumpRequest) P.vy = 8.5;
+  } else {
+    P.grounded = false;
+    P.vy = Math.max(-18, P.vy - 26 * dt);
+    let ny = P.y + P.vy * dt;
+    if (ny <= groundY) {
+      ny = groundY;
+      P.vy = 0;
+      P.grounded = true;
+    }
+    P.y = ny;
+  }
+  jumpRequest = false;
+}
+
+/* =========================================================================
+   CONTROLES TÁCTILES Y DE ESCRITORIO
+   ========================================================================= */
+
+const pad = $('pad'), stk = $('stk'), kb = $('kb');
+const clamp = v => Math.max(-1, Math.min(1, v));
+
+pad.addEventListener('pointerdown', e => {
+  pad.setPointerCapture(e.pointerId);
+  if (e.pointerType !== 'mouse' && e.clientX < window.innerWidth * 0.45 && !stickTouch) {
+    stickTouch = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 };
+    stk.style.display = 'block';
+    stk.style.left = e.clientX + 'px';
+    stk.style.top = e.clientY + 'px';
+    kb.style.transform = 'none';
+  } else if (!lookTouch) {
+    lookTouch = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  }
+});
+
+pad.addEventListener('pointermove', e => {
+  if (stickTouch && e.pointerId === stickTouch.id) {
+    stickTouch.dx = clamp((e.clientX - stickTouch.x) / 42);
+    stickTouch.dy = clamp((e.clientY - stickTouch.y) / 42);
+    kb.style.transform = `translate(${stickTouch.dx * 42}px, ${stickTouch.dy * 42}px)`;
+  } else if (lookTouch && e.pointerId === lookTouch.id) {
+    P.yaw -= (e.clientX - lookTouch.x) * 0.0055;
+    P.pit = Math.max(-1.45, Math.min(1.45, P.pit - (e.clientY - lookTouch.y) * 0.0055));
+    lookTouch.x = e.clientX;
+    lookTouch.y = e.clientY;
+  }
+});
+
+const onTouchUp = e => {
+  if (stickTouch && e.pointerId === stickTouch.id) {
+    stickTouch = null;
+    stk.style.display = 'none';
+  }
+  if (lookTouch && e.pointerId === lookTouch.id) lookTouch = null;
+};
+pad.addEventListener('pointerup', onTouchUp);
+pad.addEventListener('pointercancel', onTouchUp);
+
+// Botones de acción táctiles
+const btnFire = $('btn-fire');
+btnFire.onpointerdown = e => {
+  e.preventDefault();
+  isFiring = true;
+  if (gameStarted) fireWeapon();
+};
+btnFire.onpointerup = btnFire.onpointercancel = btnFire.onpointerleave = () => isFiring = false;
+
+$('btn-jump').onpointerdown = e => {
+  e.preventDefault();
+  jumpRequest = true;
+};
+
+$('btn-rs').onclick = () => generateCity();
+
+// Controles de teclado y ratón
+window.addEventListener('keydown', e => {
+  keyStates[e.code] = 1;
+  if (e.code === 'Space') jumpRequest = true;
+  if (e.code === 'KeyF' && gameStarted) fireWeapon();
+  if (e.code === 'Digit1') setWeapon(0);
+  if (e.code === 'Digit2') setWeapon(1);
+  if (e.code === 'Digit3') setWeapon(2);
+  if (e.code === 'Digit4') setWeapon(3);
+  if (e.code === 'KeyR') generateCity();
+});
+window.addEventListener('keyup', e => keyStates[e.code] = 0);
+
+// Captura de ratón PointerLock para PC
+document.addEventListener('click', e => {
+  if (gameStarted && !document.pointerLockElement && e.target === pad) {
+    pad.requestPointerLock();
+  }
+});
+document.addEventListener('mousemove', e => {
+  if (document.pointerLockElement === pad) {
+    P.yaw -= e.movementX * 0.0025;
+    P.pit = Math.max(-1.45, Math.min(1.45, P.pit - e.movementY * 0.0025));
+  }
+});
+document.addEventListener('mousedown', e => {
+  if (document.pointerLockElement === pad && e.button === 0) {
+    fireWeapon();
+  }
+});
+
+$('btn-start').onclick = () => {
+  AudioEngine.init();
+  $('menu').style.display = 'none';
+  gameStarted = true;
+  try {
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  } catch (err) {}
+};
+
+function handleResize() {
+  rd.setSize(window.innerWidth, window.innerHeight, false);
+  cam.aspect = window.innerWidth / window.innerHeight;
+  cam.updateProjectionMatrix();
+}
+window.addEventListener('resize', handleResize);
+handleResize();
+
+/* =========================================================================
+   BUCLE PRINCIPAL DE ANIMACIÓN Y RENDERIZADO
+   ========================================================================= */
+
+let lastTime = 0, displayedPercent = -1;
+
+function mainLoop(time) {
+  requestAnimationFrame(mainLoop);
+  const dt = Math.min(0.033, (time - lastTime) / 1000 || 0);
+  lastTime = time;
+
+  if (gameStarted) {
+    updatePlayer(dt);
+    if (isFiring && currentWeapon !== 2) fireWeapon();
+  }
+
+  cooldown -= dt;
+  weaponKick = Math.max(0, weaponKick - dt * 5.5);
+
+  // Actualizar proyectiles de cohetes
+  for (let i = rockets.length - 1; i >= 0; i--) {
+    if (!rockets[i].update(dt)) rockets.splice(i, 1);
+  }
+
+  // Actualizar masas colapsando (Falling Clusters)
+  for (let i = fallingClusters.length - 1; i >= 0; i--) {
+    fallingClusters[i].update(dt);
+    if (!fallingClusters[i].alive) fallingClusters.splice(i, 1);
+  }
+
+  // Actualizar escombros dinámicos con físicas
+  updateDebris(dt);
+
+  // Actualizar bombas C4 con temporizador sonoro
+  for (let i = bombs.length - 1; i >= 0; i--) {
+    const b = bombs[i];
+    b.t -= dt;
+    b.beepTimer += dt;
+    if (b.beepTimer >= 0.5) {
+      AudioEngine.playBeep();
+      b.beepTimer = 0;
+    }
+    b.m.material.emissive.setHex(((b.t * 8) | 0) % 2 ? 0xff3b30 : 0);
+    if (b.t <= 0) {
+      triggerExplosion(b.m.position, 6.5, 22, 0.45, 1.2);
+      sc.remove(b.m);
+      bombs.splice(i, 1);
+    }
+  }
+
+  // Destellos de explosiones
+  for (let i = fx.length - 1; i >= 0; i--) {
+    const f = fx[i];
+    f.t += dt * 2.8;
+    f.m.scale.setScalar(f.r * (0.35 + f.t * 0.9));
+    f.m.material.opacity = 0.9 * (1 - f.t);
+    if (f.t >= 1) {
+      sc.remove(f.m);
+      f.m.material.dispose();
+      fx.splice(i, 1);
+    }
+  }
+
+  // Sacudida de cámara
+  shake = Math.max(0, shake - dt * 2.2);
+  const shX = (R() - 0.5) * shake * 0.25;
+  const shY = (R() - 0.5) * shake * 0.25;
+  const shZ = (R() - 0.5) * shake * 0.25;
+  cam.position.set(P.x + shX, P.y + 1.65 + shY, P.z + shZ);
+  cam.rotation.set(P.pit, P.yaw, 0);
+
+  // Animación de retroceso del arma
+  weaponHolder.position.z = -0.55 + weaponKick * 0.15;
+  weaponHolder.rotation.x = -weaponKick * (currentWeapon === 1 ? 0.95 : 0.25);
+
+  // Telemetría del porcentaje destruido
+  const pc = Math.round((1 - cnt / total) * 100);
+  if (pc !== displayedPercent) {
+    displayedPercent = pc;
+    $('pc').textContent = pc + '%';
+  }
+
+  rd.render(sc, cam);
+}
+
+// Iniciar mundo
+generateCity();
+setWeapon(0);
+requestAnimationFrame(mainLoop);
+</script>
+</body>
+</html>
